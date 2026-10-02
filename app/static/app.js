@@ -281,31 +281,96 @@ function qaAppend(who, text, asMd) {
   return div;
 }
 
+let oralPending = null; // 口頭試問の出題中の問題文
+
+function qaThinking(text) {
+  const d = document.createElement('div');
+  d.className = 'qaThinking';
+  d.textContent = text;
+  $('qaLog').appendChild(d);
+  $('qaLog').scrollTop = $('qaLog').scrollHeight;
+  return d;
+}
+
+async function oralStart() {
+  if (!curData) return;
+  $('oralBtn').disabled = true;
+  const thinking = qaThinking('先生が問題を考えています…');
+  try {
+    const res = await fetch('/api/oral', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phase: 'ask', lesson: cur.lesson, chapter: cur.chapter }),
+    });
+    thinking.remove();
+    if (!res.ok) { qaAppend('claude', 'エラー: ' + (await res.text()), false); return; }
+    const data = await res.json();
+    oralPending = data.question;
+    qaAppend('claude', '🎤 **口頭試問です。自分の言葉で答えてみてください。**\n\n' + data.question, true);
+    $('qaInput').placeholder = '自分の言葉で答えを書いて送信（Ctrl+Enter）';
+    $('qaInput').focus();
+  } catch (e) {
+    thinking.remove();
+    qaAppend('claude', '通信エラー: ' + e, false);
+  } finally {
+    $('oralBtn').disabled = false;
+  }
+}
+
 async function qaAsk() {
   const q = $('qaInput').value.trim();
   if (!q || !curData) return;
   $('qaInput').value = '';
   $('qaSend').disabled = true;
   qaAppend('user', q, false);
-  const thinking = document.createElement('div');
-  thinking.className = 'qaThinking';
-  thinking.textContent = '先生が考えています…';
-  $('qaLog').appendChild(thinking);
+  const grading = oralPending !== null;
+  const thinking = qaThinking(grading ? '先生が採点しています…' : '先生が考えています…');
   try {
-    const res = await fetch('/api/ask', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lesson: cur.lesson, chapter: cur.chapter, question: q }),
-    });
+    let res;
+    if (grading) {
+      res = await fetch('/api/oral', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phase: 'grade', lesson: cur.lesson, chapter: cur.chapter, question: oralPending, answer: q }),
+      });
+    } else {
+      res = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lesson: cur.lesson, chapter: cur.chapter, question: q }),
+      });
+    }
     thinking.remove();
     if (!res.ok) { qaAppend('claude', 'エラー: ' + (await res.text()), false); return; }
     const data = await res.json();
-    qaAppend('claude', data.answer, true);
+    qaAppend('claude', grading ? data.feedback : data.answer, true);
+    if (grading) {
+      oralPending = null;
+      $('qaInput').placeholder = 'いま学んでいる内容について先生に質問（Ctrl+Enter で送信）';
+      qaAppend('claude', 'もう1問受けるなら「🎤 口頭試問を受ける」を押してください。', false);
+    }
   } catch (e) {
     thinking.remove();
     qaAppend('claude', '通信エラー: ' + e, false);
   } finally {
     $('qaSend').disabled = false;
+  }
+}
+
+async function latestCreate() {
+  if (!confirm('AI が Web 検索で最新の統計数値と法改正を調べてノートを作ります（2〜5分かかります）。よろしいですか？')) return;
+  $('latestBtn').disabled = true;
+  $('qaNotesStatus').textContent = '先生が最新情報を Web で調べています…（2〜5分かかります）';
+  try {
+    const res = await fetch('/api/qa/latest', { method: 'POST' });
+    if (!res.ok) { $('qaNotesStatus').textContent = 'エラー: ' + (await res.text()); return; }
+    const data = await res.json();
+    $('latestNote').innerHTML = mdToHtml(data.note);
+    $('qaNotesStatus').textContent = '直前対策ノートを作成しました（出典 URL 付き。直前にもう一度作り直すと最新になります）';
+  } catch (e) {
+    $('qaNotesStatus').textContent = '通信エラー: ' + e;
+  } finally {
+    $('latestBtn').disabled = false;
   }
 }
 
@@ -337,10 +402,14 @@ async function loadMistakes() {
 async function qaLoadNotes() {
   loadMistakes();
   try {
-    const [listRes, sumRes] = await Promise.all([fetch('/api/qa'), fetch('/api/qa/summary')]);
+    const [listRes, sumRes, latestRes] = await Promise.all([
+      fetch('/api/qa'), fetch('/api/qa/summary'), fetch('/api/qa/latest'),
+    ]);
     const list = (await listRes.json()).items || [];
     const summary = (await sumRes.json()).summary || '';
+    const latest = (await latestRes.json()).note || '';
     $('qaSummary').innerHTML = summary ? mdToHtml(summary) : '';
+    $('latestNote').innerHTML = latest ? mdToHtml(latest) : '';
     const box = $('qaList');
     box.innerHTML = '';
     if (list.length === 0) {
@@ -428,6 +497,8 @@ function initQA() {
   });
   $('qaSummaryBtn').onclick = qaSummarize;
   $('qaReviewBtn').onclick = qaMakeReview;
+  $('oralBtn').onclick = oralStart;
+  $('latestBtn').onclick = latestCreate;
 }
 
 // ---- 起動 ----

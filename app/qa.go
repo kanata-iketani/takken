@@ -107,12 +107,17 @@ func (s *qaStore) recentInChapter(lesson, chapter, n int) []QA {
 // ---- Claude CLI 実行 ----
 
 func runClaude(prompt string, timeout time.Duration) (string, error) {
+	return runClaudeArgs(prompt, timeout)
+}
+
+func runClaudeArgs(prompt string, timeout time.Duration, extra ...string) (string, error) {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return "", errors.New("この機能にはローカルの Claude Code CLI が必要です (claude コマンドが見つかりません)")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "claude", "-p", "--model", claudeModel, "--output-format", "text")
+	args := append([]string{"-p", "--model", claudeModel, "--output-format", "text"}, extra...)
+	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = courseRoot
 	cmd.Stdin = strings.NewReader(prompt)
 	var out, errBuf strings.Builder
@@ -274,10 +279,14 @@ func handleReviewCreate(w http.ResponseWriter, r *http.Request) {
 	var b strings.Builder
 	b.WriteString("あなたは" + qaCourseDesc + "教材作成者です。" + qaAudience + "\n")
 	b.WriteString("以下は受講者の学習記録(質問と誤答)です。この受講者の弱点を突く復習チャプターを 1〜2 個作ってください。\n\n")
+	if ws := weakLessonSummary(5); ws != "" {
+		b.WriteString(ws + "\n")
+	}
 	if buildStudyLog(&b) == 0 {
 		http.Error(w, "まだ記録がありません。問題を解いたり質問したりしてから使ってください", 400)
 		return
 	}
+	b.WriteString("\n重要: 誤答の多い分野を優先し、**同じ論点を別の角度から**出題すること(事例を変える・問い方を変える・正誤を反転する・比較で問う)。受講者が間違えた問題の丸写しは禁止。\n")
 	b.WriteString("\n出力は次のスキーマの JSON 配列 **のみ** を ```json フェンスで囲んで出力してください。前後に説明文を書かないでください。\n\n")
 	b.WriteString("```\n[{\n" + `  "lesson": 90, "chapter": 1,
   "title": "復習: <弱点のテーマ>",

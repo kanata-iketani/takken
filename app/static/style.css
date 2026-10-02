@@ -171,6 +171,11 @@ body {
   padding: 7px 14px; font-size: 12px; color: var(--muted);
   border-bottom: 1px solid var(--border); flex: 0 0 auto;
 }
+#qaModes { padding: 8px 14px 0; }
+#qaModes .btn { font-size: 12.5px; width: 100%; }
+#latestNote { font-size: 13.5px; margin: 10px 0 16px; }
+#latestNote:not(:empty) { border: 1px solid var(--border); border-radius: 10px; padding: 4px 16px; }
+#latestBtn { margin-bottom: 4px; }
 #qaLog { flex: 1; overflow-y: auto; padding: 14px; }
 .qaMsg { margin-bottom: 14px; font-size: 13.5px; line-height: 1.9; }
 .qaMsg .who { font-size: 11px; font-weight: bold; color: var(--muted); margin-bottom: 3px; }
