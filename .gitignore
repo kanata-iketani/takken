@@ -7,3 +7,4 @@ app/server.log
 lesson90/
 .DS_Store
 app/latest.md
+app/ai_usage.json

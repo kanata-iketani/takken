@@ -110,9 +110,47 @@ func runClaude(prompt string, timeout time.Duration) (string, error) {
 	return runClaudeArgs(prompt, timeout)
 }
 
+// aiLimit は AI 呼び出しの1日あたり上限(-ai-limit フラグ、0 = 無制限)。
+// 端末を貸して試験運用するときに、持ち主の利用枠を守るための安全弁。
+var aiLimit int
+
+type aiUsage struct {
+	Date  string `json:"date"`
+	Count int    `json:"count"`
+}
+
+var aiUsageMu sync.Mutex
+
+func checkAIBudget() error {
+	if aiLimit <= 0 {
+		return nil
+	}
+	aiUsageMu.Lock()
+	defer aiUsageMu.Unlock()
+	path := filepath.Join(appDir, "ai_usage.json")
+	var u aiUsage
+	if b, err := os.ReadFile(path); err == nil {
+		json.Unmarshal(b, &u)
+	}
+	today := time.Now().Format("2006-01-02")
+	if u.Date != today {
+		u = aiUsage{Date: today, Count: 0}
+	}
+	if u.Count >= aiLimit {
+		return fmt.Errorf("今日の AI 利用上限(%d回)に達しました。明日また使えます(学習機能はそのまま使えます)", aiLimit)
+	}
+	u.Count++
+	b, _ := json.Marshal(u)
+	os.WriteFile(path, b, 0o644)
+	return nil
+}
+
 func runClaudeArgs(prompt string, timeout time.Duration, extra ...string) (string, error) {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return "", errors.New("この機能にはローカルの Claude Code CLI が必要です (claude コマンドが見つかりません)")
+	}
+	if err := checkAIBudget(); err != nil {
+		return "", err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
