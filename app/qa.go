@@ -106,27 +106,78 @@ func (s *qaStore) recentInChapter(lesson, chapter, n int) []QA {
 
 // ---- Claude CLI 実行 ----
 
-func runClaude(prompt string, timeout time.Duration) (string, error) {
-	return runClaudeArgs(prompt, timeout)
+func runClaude(category, prompt string, timeout time.Duration) (string, error) {
+	return runClaudeArgs(category, prompt, timeout)
 }
 
-// aiLimit は AI 呼び出しの1日あたり上限(-ai-limit フラグ、0 = 無制限)。
-// 端末を貸して試験運用するときに、持ち主の利用枠を守るための安全弁。
-var aiLimit int
+// ---- AI 利用制限 (ai-config.json / GitHub からリモート取得) ----
+// 管理者(リポジトリ所有者)が GitHub 上の ai-config.json を編集すると、
+// 実行中のアプリが定期取得して反映する。値: -1=無制限 / 0=停止 / N>0=1日N回。
+// 「チャット」(自由質問)と「コア機能」(口頭試問・弱点まとめ・復習生成・統計ノート)で別管理。
+
+type aiConfig struct {
+	ChatDailyLimit int `json:"chat_daily_limit"`
+	CoreDailyLimit int `json:"core_daily_limit"`
+}
+
+var (
+	aiConfigURL string // -ai-config-url フラグ
+	aiMu        sync.Mutex
+	aiCached    aiConfig
+	aiFetchedAt time.Time
+)
+
+// loadAIConfig はリモート(GitHub) → ローカル ai-config.json → 既定値 の順で設定を得る。
+// リモートは10分キャッシュ。
+func loadAIConfig() aiConfig {
+	cfg := aiConfig{ChatDailyLimit: 20, CoreDailyLimit: -1} // 既定値
+	if b, err := os.ReadFile(filepath.Join(courseRoot, "ai-config.json")); err == nil {
+		json.Unmarshal(b, &cfg)
+	}
+	if aiConfigURL == "" {
+		return cfg
+	}
+	if time.Since(aiFetchedAt) < 10*time.Minute {
+		return aiCached
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(aiConfigURL)
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == 200 {
+			var remote aiConfig
+			if json.NewDecoder(resp.Body).Decode(&remote) == nil {
+				cfg = remote
+			}
+		}
+	}
+	aiCached = cfg
+	aiFetchedAt = time.Now()
+	return cfg
+}
 
 type aiUsage struct {
-	Date  string `json:"date"`
-	Count int    `json:"count"`
+	Date string `json:"date"`
+	Chat int    `json:"chat"`
+	Core int    `json:"core"`
 }
 
-var aiUsageMu sync.Mutex
-
-func checkAIBudget() error {
-	if aiLimit <= 0 {
-		return nil
+func checkAIBudget(category string) error {
+	aiMu.Lock()
+	defer aiMu.Unlock()
+	cfg := loadAIConfig()
+	limit := cfg.CoreDailyLimit
+	label := "AI 機能"
+	if category == "chat" {
+		limit = cfg.ChatDailyLimit
+		label = "チャット質問"
 	}
-	aiUsageMu.Lock()
-	defer aiUsageMu.Unlock()
+	if limit < 0 {
+		return nil // 無制限
+	}
+	if limit == 0 {
+		return fmt.Errorf("%sは現在停止中です(管理者設定)。学習機能はそのまま使えます", label)
+	}
 	path := filepath.Join(appDir, "ai_usage.json")
 	var u aiUsage
 	if b, err := os.ReadFile(path); err == nil {
@@ -134,22 +185,26 @@ func checkAIBudget() error {
 	}
 	today := time.Now().Format("2006-01-02")
 	if u.Date != today {
-		u = aiUsage{Date: today, Count: 0}
+		u = aiUsage{Date: today}
 	}
-	if u.Count >= aiLimit {
-		return fmt.Errorf("今日の AI 利用上限(%d回)に達しました。明日また使えます(学習機能はそのまま使えます)", aiLimit)
+	count := &u.Core
+	if category == "chat" {
+		count = &u.Chat
 	}
-	u.Count++
+	if *count >= limit {
+		return fmt.Errorf("今日の%s上限(%d回)に達しました。明日また使えます(学習機能はそのまま使えます)", label, limit)
+	}
+	*count++
 	b, _ := json.Marshal(u)
 	os.WriteFile(path, b, 0o644)
 	return nil
 }
 
-func runClaudeArgs(prompt string, timeout time.Duration, extra ...string) (string, error) {
+func runClaudeArgs(category, prompt string, timeout time.Duration, extra ...string) (string, error) {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return "", errors.New("この機能にはローカルの Claude Code CLI が必要です (claude コマンドが見つかりません)")
 	}
-	if err := checkAIBudget(); err != nil {
+	if err := checkAIBudget(category); err != nil {
 		return "", err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -222,7 +277,7 @@ func handleAsk(w http.ResponseWriter, r *http.Request) {
 - 宅建試験でどう問われやすいかの視点をひと言添える
 - ファイル操作やツールは使わず、上記の文脈だけで答える。Markdown で書く`)
 
-	answer, err := runClaude(b.String(), 180*time.Second)
+	answer, err := runClaude("chat", b.String(), 180*time.Second)
 	if err != nil {
 		http.Error(w, err.Error(), 502)
 		return
@@ -302,7 +357,7 @@ func handleSummaryCreate(w http.ResponseWriter, r *http.Request) {
 ## 次にやるべきこと (具体的な復習アドバイス2〜3個。関連レッスン番号つき)
 ルール: です・ます調。励ます調子で。ツールは使わない。Markdown 本文だけを出力する。`)
 
-	summary, err := runClaude(b.String(), 300*time.Second)
+	summary, err := runClaude("core", b.String(), 300*time.Second)
 	if err != nil {
 		http.Error(w, err.Error(), 502)
 		return
@@ -346,7 +401,7 @@ func handleReviewCreate(w http.ResponseWriter, r *http.Request) {
 - 法改正に注意し、確信が持てない論点は出題しない
 - priority は 🔴/🟡/⚪。です・ます調。ツールは使わない。JSON だけを出力する`)
 
-	raw, err := runClaude(b.String(), 420*time.Second)
+	raw, err := runClaude("core", b.String(), 420*time.Second)
 	if err != nil {
 		http.Error(w, err.Error(), 502)
 		return

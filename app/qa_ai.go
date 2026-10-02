@@ -14,7 +14,7 @@ import (
 
 // runClaudeWeb は Web 検索を許可して Claude を実行する(最新統計・法改正の調査用)。
 func runClaudeWeb(prompt string, timeout time.Duration) (string, error) {
-	return runClaudeArgs(prompt, timeout, "--allowedTools", "WebSearch,WebFetch")
+	return runClaudeArgs("core", prompt, timeout, "--allowedTools", "WebSearch,WebFetch")
 }
 
 // ---- 弱点のレッスン別集計 ----
@@ -99,7 +99,7 @@ func handleOral(w http.ResponseWriter, r *http.Request) {
 上記の内容について「口頭試問」を1問だけ出題してください。4択の暗記では答えられない、別の角度からの記述式の問いにします。
 出題パターン(どれか1つ): ①理由を説明させる(「なぜ〜なのか」) ②具体的な事例を挙げて判断させる(「この場合どうなるか」) ③似た制度と比較させる ④よくある誤解を提示して誤りを指摘させる
 ルール: 問題文だけを出力する(前置き・解答・ヒントは書かない)。超初心者が1〜3文で答えられる粒度。です・ます調。`)
-		out, err := runClaude(b.String(), 180*time.Second)
+		out, err := runClaude("core", b.String(), 180*time.Second)
 		if err != nil {
 			http.Error(w, err.Error(), 502)
 			return
@@ -117,7 +117,7 @@ func handleOral(w http.ResponseWriter, r *http.Request) {
 **模範解答:** 2〜3文で
 **コメント:** 良かった点と、曖昧・誤解だった点を具体的に。試験でどう問われるかをひと言添える
 ルール: です・ます調で励ます調子。甘い採点はしない(試験に受かることが目的)。`)
-		out, err := runClaude(b.String(), 180*time.Second)
+		out, err := runClaude("core", b.String(), 180*time.Second)
 		if err != nil {
 			http.Error(w, err.Error(), 502)
 			return
