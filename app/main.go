@@ -351,6 +351,7 @@ func handleAnswer(w http.ResponseWriter, r *http.Request) {
 
 	key := progressKey(req.Lesson, req.Chapter)
 	correct := req.Choice == q.Correct
+	srsRecord(req.Lesson, req.Chapter, req.Q, correct) // 復習(間隔反復)の記録
 
 	var solved []bool
 	var cleared bool
@@ -429,6 +430,7 @@ func main() {
 	http.HandleFunc("POST /api/qa/review", handleReviewCreate)
 
 	log.Printf("%sを起動しました: http://%s （講座ルート: %s）", courseTitle, *addr, courseRoot)
+	srsInit() // 復習(間隔反復)
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
 
