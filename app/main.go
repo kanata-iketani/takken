@@ -399,7 +399,7 @@ func detectRoot() string {
 
 func main() {
 	flag.StringVar(&courseRoot, "root", "", "講座ルート（lessonNN の親ディレクトリ。省略時は自動検出）")
-	flag.StringVar(&claudeModel, "claude-model", "sonnet", "質問回答に使う Claude モデル（claude CLI の --model に渡す。CLI がない環境では質問機能のみ無効）")
+	flag.StringVar(&claudeModel, "claude-model", "opus", "質問回答に使う Claude モデル（claude CLI の --model に渡す。CLI がない環境では質問機能のみ無効）")
 	flag.StringVar(&aiConfigURL, "ai-config-url", "https://raw.githubusercontent.com/kanata-iketani/takken/main/ai-config.json", "AI利用制限設定の取得元URL（空でローカル ai-config.json のみ使用）")
 	addr := flag.String("addr", defaultAddr, "待ち受けアドレス（127.0.0.1 のみ推奨）")
 	flag.Parse()
